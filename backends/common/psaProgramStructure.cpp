@@ -23,11 +23,20 @@ void InspectPsaProgram::addHeaderType(const IR::Type_StructLike *st) {
     LOG5("In addHeaderType with struct " << st->toString());
     if (st->is<IR::Type_HeaderUnion>()) {
         LOG5("Struct is Type_HeaderUnion");
-        for (auto f : st->fields) {
-            auto ftype = typeMap->getType(f, true);
-            auto ht = ftype->to<IR::Type_Header>();
-            CHECK_NULL(ht);
-            addHeaderType(ht);
+        auto &fields = pinfo->header_union_fields[st->getName()];
+        if (fields.empty()) {
+            for (auto f : st->fields) {
+                auto ftype = typeMap->getType(f, false);
+                if (ftype == nullptr) {
+                    auto typeName = f->type->to<IR::Type_Name>();
+                    CHECK_NULL(typeName);
+                    ftype = refMap->getDeclaration(typeName->path, true)->to<IR::Type>();
+                }
+                auto ht = ftype->to<IR::Type_Header>();
+                CHECK_NULL(ht);
+                addHeaderType(ht);
+                fields.emplace_back(f->controlPlaneName(), ht->controlPlaneName());
+            }
         }
         pinfo->header_union_types.emplace(st->getName(), st->to<IR::Type_HeaderUnion>());
         return;
@@ -58,11 +67,19 @@ void InspectPsaProgram::addHeaderStackInstance(const IR::StructField *field,
     pinfo->header_stacks.emplace(field->controlPlaneName(), stack_decl);
 }
 
+void InspectPsaProgram::addHeaderUnionStackInstance(const IR::StructField *field,
+                                                    const IR::Type_Array *stack) {
+    auto stack_decl = new IR::Declaration_Variable(field->controlPlaneName(), stack);
+    typeMap->setType(stack_decl, stack);
+    pinfo->header_union_stacks.emplace(field->controlPlaneName(), stack_decl);
+}
+
 void InspectPsaProgram::addTypesAndInstances(const IR::Type_StructLike *type, bool isHeader) {
     LOG5("Adding type " << type->toString() << " and isHeader " << isHeader);
     for (auto f : type->fields) {
         LOG5("Iterating through field " << f->toString());
-        auto ft = typeMap->getType(f, true);
+        auto ft = typeMap->getType(f, false);
+        if (ft == nullptr) continue;
         if (ft->is<IR::Type_StructLike>()) {
             // The headers struct can not contain nested structures.
             if (isHeader && ft->is<IR::Type_Struct>()) {
@@ -77,7 +94,8 @@ void InspectPsaProgram::addTypesAndInstances(const IR::Type_StructLike *type, bo
     }
 
     for (auto f : type->fields) {
-        auto ft = typeMap->getType(f, true);
+        auto ft = typeMap->getType(f, false);
+        if (ft == nullptr) continue;
         if (ft->is<IR::Type_StructLike>()) {
             if (auto hft = ft->to<IR::Type_Header>()) {
                 LOG5("Field is Type_Header");
@@ -85,7 +103,12 @@ void InspectPsaProgram::addTypesAndInstances(const IR::Type_StructLike *type, bo
             } else if (ft->is<IR::Type_HeaderUnion>()) {
                 LOG5("Field is Type_HeaderUnion");
                 for (auto uf : ft->to<IR::Type_HeaderUnion>()->fields) {
-                    auto uft = typeMap->getType(uf, true);
+                    auto uft = typeMap->getType(uf, false);
+                    if (uft == nullptr) {
+                        auto typeName = uf->type->to<IR::Type_Name>();
+                        CHECK_NULL(typeName);
+                        uft = refMap->getDeclaration(typeName->path, true)->to<IR::Type>();
+                    }
                     if (auto h_type = uft->to<IR::Type_Header>()) {
                         addHeaderInstance(h_type, uf->controlPlaneName());
                     } else {
@@ -94,9 +117,7 @@ void InspectPsaProgram::addTypesAndInstances(const IR::Type_StructLike *type, bo
                         return;
                     }
                 }
-                pinfo->header_union_types.emplace(type->getName(),
-                                                  type->to<IR::Type_HeaderUnion>());
-                addHeaderInstance(type, f->controlPlaneName());
+                addHeaderInstance(ft->to<IR::Type_HeaderUnion>(), f->controlPlaneName());
             } else {
                 LOG5("Adding struct with type " << type);
                 pinfo->metadata_types.emplace(type->getName(), type->to<IR::Type_Struct>());
@@ -120,7 +141,8 @@ void InspectPsaProgram::addTypesAndInstances(const IR::Type_StructLike *type, bo
                 addHeaderStackInstance(f, stack);
             } else {
                 auto ht = type->to<IR::Type_HeaderUnion>();
-                addHeaderType(ht);                
+                addHeaderType(ht);
+                addHeaderUnionStackInstance(f, stack);
             }
             // Dunno why addHeaderInstance is called heare for each element of the stack.
             // As far as I can figure out, the code block from line 83 to 103 should add
