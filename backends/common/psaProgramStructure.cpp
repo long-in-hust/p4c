@@ -108,16 +108,20 @@ void InspectPsaProgram::addTypesAndInstances(const IR::Type_StructLike *type, bo
             // auto stack_name = f->controlPlaneName();
             // auto stack_size = stack->getSize();
             auto type = typeMap->getTypeType(stack->elementType, true);
-            BUG_CHECK(type->is<IR::Type_Header>(), "%1% not a header type", stack->elementType);
-            auto ht = type->to<IR::Type_Header>();
-            addHeaderType(ht);
-            // auto stack_type = stack->elementType->to<IR::Type_Header>();
+            BUG_CHECK(type->is<IR::Type_Header>() || type->is<IR::Type_HeaderUnion>(),
+                      "%1% not a header nor header union type", stack->elementType);
 
-            // I have yet to consider Union Stacks. As of this commit, a bug check
-            // will reject a Union Stack as it's not a header instance whenever
-            // is declared in the P4 code.
-            addHeaderStackInstance(f, stack);
-
+            if (type->is<IR::Type_Header>()) {
+                // I have yet to consider Union Stacks. As of this commit, a bug check
+                // will reject a Union Stack as it's not a header instance whenever
+                // is declared in the P4 code.
+                auto ht = type->to<IR::Type_Header>();
+                addHeaderType(ht);
+                addHeaderStackInstance(f, stack);
+            } else {
+                auto ht = type->to<IR::Type_HeaderUnion>();
+                addHeaderType(ht);                
+            }
             // Dunno why addHeaderInstance is called heare for each element of the stack.
             // As far as I can figure out, the code block from line 83 to 103 should add
             // those stack element into the JSON file as singular headers.
